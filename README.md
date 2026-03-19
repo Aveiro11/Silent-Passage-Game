@@ -10,7 +10,7 @@ You are a traveller trying to pass through three rooms, each with its own challe
 
 | Room | Challenge | How to Pass |
 |------|-----------|-------------|
-| 🐉 Dragon's Corridor | A dragon sleeps in the corridor | Speak quietly (volume ≤ 30) — any word will do, as long as you whisper |
+| 🐉 Dragon's Corridor | A dragon sleeps in the corridor | Speak quietly — any word will do, as long as you whisper |
 | 💂 Guard's Gate | A guard blocks the gate | Politely ask or greet the guard, quietly |
 | 🏛️ Sacred Temple | A temple door demands a password | Whisper the secret password *"Adib"* |
 
@@ -18,15 +18,44 @@ If you speak too loudly near the dragon, it wakes up and kills you. If you threa
 
 ---
 
+## 🎲 Random Events
+
+Every time you start a new game, each room is randomly selected from two possible variants. This means no two runs are the same.
+
+### 🐉 Dragon's Corridor
+
+| Variant | Condition | Max Volume |
+|---------|-----------|------------|
+| **Sleeping** | The dragon sleeps peacefully | ≤ 30 |
+| **Half-Awake** | The dragon stirs restlessly — you must be absolutely silent | ≤ 15 |
+
+### 💂 Guard's Gate
+
+| Variant | Condition | Accepted Intents |
+|---------|-----------|-----------------|
+| **Normal** | The guard is on duty | Polite request, command, or greeting |
+| **Grumpy** | The guard is furious today | Greeting only |
+
+### 🏛️ Sacred Temple
+
+| Variant | Condition | Max Volume |
+|---------|-----------|------------|
+| **Normal** | Standard temple | ≤ 30 |
+| **Strict** | The temple feels more sacred than usual | ≤ 20 |
+
+---
+
 ## Volume System
 
 Every room has a volume threshold. Your microphone is monitored in real time using the Web Audio API. The volume level is measured as an average frequency amplitude (0–255 scale).
 
-| Room | Max Volume Allowed |
-|------|--------------------|
-| Dragon's Corridor | 30 |
-| Guard's Gate | 20–30 |
-| Sacred Temple | 30 |
+| Room | Variant | Max Volume Allowed |
+|------|---------|-------------------|
+| Dragon's Corridor | Normal | 30 |
+| Dragon's Corridor | Half-Awake | 15 |
+| Guard's Gate | Both | 20–30 |
+| Sacred Temple | Normal | 30 |
+| Sacred Temple | Strict | 20 |
 
 A live volume meter is shown on screen so you can gauge how loudly you are speaking before and during each room.
 
@@ -40,12 +69,15 @@ This means:
 - Heavy accents are handled gracefully
 - You do not need to say it perfectly
 - Shouting it still fails (volume check applies independently)
+- The stricter temple variant adds an extra challenge by requiring an even softer whisper
 
 ---
 
 ## Guard Room — Intent Detection
 
-The guard room uses **Azure Conversational Language Understanding (CLU)** to classify your intent. The following intents are recognised:
+The guard room uses **Azure Conversational Language Understanding (CLU)** to classify your intent.
+
+### Normal Guard
 
 | Intent | Example Utterances |
 |--------|--------------------|
@@ -53,7 +85,15 @@ The guard room uses **Azure Conversational Language Understanding (CLU)** to cla
 | `GameCommand` | "Move aside", "Let me through" |
 | `GameGreeting` | "Hello there", "Good day" |
 
-Any other intent (including threats) sends you back to room 1.
+### Grumpy Guard
+
+Only a greeting will work. Commands and polite requests will offend him.
+
+| Intent | Example Utterances |
+|--------|--------------------|
+| `GameGreeting` | "Hello there", "Good day", "Hey" |
+
+Any other intent (including threats) sends you back to room 1 in both variants.
 
 ---
 
@@ -79,7 +119,7 @@ src/
   nlu.ts           # Azure CLU intent detection
   audio.ts         # Microphone volume monitoring (Web Audio API)
   xml-parser.ts    # Loads room definitions from game.xml
-  game.xml         # Room content and volume thresholds
+  game.xml         # Room content, variants, and volume thresholds
   types.ts         # TypeScript interfaces
   main.ts          # Entry point, UI wiring, volume meter
   style.css        # Game UI styles
@@ -109,6 +149,9 @@ Key design decisions:
 - **Adaptive mic delay** — the microphone opens after a delay calculated from the text length of the room prompt (`wordCount / 150 * 60000 + 1500ms`), preventing TTS audio from bleeding into the recogniser.
 - **Fresh actor on restart** — after a `final` state (death or victory), a brand new XState actor is created on `startGame()` since a stopped actor cannot be restarted.
 - **`isDefaultPass` guard exclusion** — the dragon, guard, and temple rooms are explicitly excluded from the default volume-range pass so they can only be cleared by their own dedicated guards.
+- **Random room selection** — `pickRooms()` filters all rooms by type at game start and randomly picks one variant per room type, keeping each run unpredictable.
+- **Variant-aware feedback** — the dragon pass message differs depending on which variant was active (`dragon_halfawake` gets a different line than the normal sleeping dragon).
+- **Grumpy guard intent restriction** — `checkGuardIntent` checks the room `id` at runtime and narrows the allowed intents to `GameGreeting` only when the grumpy variant is active.
 
 ---
 
@@ -162,7 +205,7 @@ speechConfig.endpointId = "your-custom-model-endpoint-id";
 speechConfig.speechRecognitionLanguage = "en-US";
 ```
 
-A confidence threshold of `0.6` is applied — if the model is at least 60% confident it heard the password, and the volume is within range, the temple door opens.
+A confidence threshold of `0.6` is applied — if the model is at least 60% confident it heard the password, and the volume is within range, the temple door opens. The strict temple variant tightens the volume requirement further (≤ 20 instead of ≤ 30).
 
 ---
 
@@ -171,6 +214,7 @@ A confidence threshold of `0.6` is applied — if the model is at least 60% conf
 - The volume meter reads instantaneous amplitude at the moment recognition completes, not the average over the whole utterance. A loud start followed by a quiet finish may still pass.
 - TTS bleed (the microphone picking up speaker output) is mitigated by an adaptive delay but may still occur on very loud speaker setups. Using headphones is recommended.
 - The game must be reloaded if the Azure Speech session expires mid-game.
+- Random room selection is done once per `startGame()` call — you cannot see which variant you got until you enter the room.
 
 ---
 
